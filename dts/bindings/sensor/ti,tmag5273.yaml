@@ -100,10 +100,12 @@ properties:
   trigger-conversion-via-int:
     type: boolean
     description: |
-      Selects initiation of a single conversion based on a trigger via
-      the INT-pin if enabled, and via I2C-command if disabled.
+      Initiate a single conversion using a trigger via the INT-pin if enabled,
+      and via I2C-command if disabled (standby-mode).
 
-      Used in "standby"-, "wakeup-and-sleep"- and "sleep"-mode.
+      This trigger setting is also used to wake-up the sensor if it is in
+      "wakeup-and-sleep"- or "sleep"-mode.
+
       Using I2C-conversion trigger may result in (handled) I2C-errors.
 
   angle-magnitude-axis:
@@ -194,3 +196,13 @@ properties:
       Defaults to value provided by datasheet.
 
       Ignored if supply-gpios not defined.
+
+  pm-i2c-vcc-slew-rate-sequence:
+    type: boolean
+    description: |
+      Activates the Vcc ramp < 3V/ms workaround.
+
+      As stated in the datasheet, if the VCC ramp rate is slower than 3V/ms,
+      the device needs to run a wake-up and sleep cycle after power-up or
+      power-up reset to avoid I2C address glitch during sleep mode.
+      If the sensor is randomly not reachable after power-up, activate this option.

@@ -20,6 +20,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
 #include <zephyr/drivers/sensor.h>
+#include <zephyr/pm/device.h>
 #include <zephyr/sys/byteorder.h>
 #include <zephyr/sys/check.h>
 #include <zephyr/sys/crc.h>
@@ -78,6 +79,10 @@ struct tmag5273_config {
 #ifdef CONFIG_CRC
 	bool crc_enabled;
 #endif
+
+#ifdef CONFIG_PM_DEVICE
+	bool pm_i2c_workaround;
+#endif
 };
 
 struct tmag5273_data {
@@ -94,6 +99,8 @@ struct tmag5273_data {
 	int16_t angle_sample;     /** measured angle in degree, if activated */
 	uint8_t magnitude_sample; /** Positive vector magnitude (can be >7 bit). */
 };
+
+static int tmag5273_init(const struct device *dev);
 
 /**
  * @brief resets the DEVICE_STATUS register
@@ -267,6 +274,131 @@ static inline uint16_t tmag5273_range_low(uint8_t version)
 	return (version == TMAG5273_VER_TMAG5273X1) ? TMAG5273_MEAS_RANGE_LOW_MT_VER1
 						    : TMAG5273_MEAS_RANGE_LOW_MT_VER2;
 }
+
+#ifdef CONFIG_PM_DEVICE
+static int tmag5273_pm_is_modifiable(const struct device *dev)
+{
+	enum pm_device_state pm_state;
+	int retval;
+
+	retval = pm_device_state_get(dev, &pm_state);
+	if (retval < 0) {
+		LOG_ERR("cannot read pm device state %d", retval);
+		return retval;
+	}
+
+	if (pm_state == PM_DEVICE_STATE_SUSPENDED) {
+		LOG_ERR("device suspended (not modifiable)");
+		return -EIO;
+	}
+
+	return 0;
+}
+
+static bool tmag5273_pm_wakeup(const struct device *dev)
+{
+	/* note that this is the default behavior to wake up the sensor! */
+	const struct tmag5273_config *drv_cfg = dev->config;
+	int retval;
+
+	if (drv_cfg->trigger_conv_via_int) {
+		retval = tmag5273_dev_int_trigger(drv_cfg);
+		if (retval < 0) {
+			return false;
+		}
+	} else {
+		uint8_t regdata;
+
+		retval =
+			i2c_reg_read_byte_dt(&drv_cfg->i2c, TMAG5273_REG_DEVICE_CONFIG_2, &regdata);
+
+		if (retval < 0) {
+			LOG_WRN("error can be ignored, TMAG5273 does not ack on sleep wakeup");
+		}
+	}
+
+	k_usleep(TMAG5273_T_WAKEUP_US);
+
+	return true;
+}
+
+static int tmag5273_pm_write_target_mode(const struct device *dev, const uint8_t target_mode)
+{
+	const struct tmag5273_config *drv_cfg = dev->config;
+	int retval;
+
+	if (!tmag5273_pm_wakeup(dev)) {
+		return -EIO;
+	}
+
+	retval = i2c_reg_update_byte_dt(&drv_cfg->i2c, TMAG5273_REG_DEVICE_CONFIG_2,
+					TMAG5273_OPERATING_MODE_MSK, target_mode);
+	if (retval < 0) {
+		return retval;
+	}
+
+	return 0;
+}
+
+static int tmag5273_pm_ctrl(const struct device *dev, enum pm_device_action action)
+{
+	const struct tmag5273_config *drv_cfg = dev->config;
+	uint8_t target_mode;
+	int retval;
+
+	switch (action) {
+	case PM_DEVICE_ACTION_RESUME:
+		target_mode = (drv_cfg->operation_mode == TMAG5273_DT_OPER_MODE_CONTINUOUS)
+				      ? TMAG5273_OPERATING_MODE_CONTINUOUS
+				      : TMAG5273_OPERATING_MODE_STANDBY;
+
+		retval = tmag5273_pm_write_target_mode(dev, target_mode);
+		if (retval < 0) {
+			return retval;
+		}
+
+		k_usleep(TMAG5273_T_WAKEUP_US);
+		break;
+	case PM_DEVICE_ACTION_SUSPEND:
+		target_mode = (drv_cfg->pm_suspend_to_wakeup_sleep)
+				      ? TMAG5273_OPERATING_MODE_WAKEUP_SLEEP
+				      : TMAG5273_OPERATING_MODE_SLEEP;
+
+		retval = tmag5273_pm_write_target_mode(dev, target_mode);
+		if (retval < 0) {
+			return retval;
+		}
+
+		k_usleep(TMAG5273_T_TO_SLEEP_US);
+		break;
+	case PM_DEVICE_ACTION_TURN_OFF:
+		if (!gpio_is_ready_dt(&drv_cfg->supply_gpio)) {
+			return -ENOTSUP;
+		}
+
+		retval = gpio_pin_set_dt(&drv_cfg->supply_gpio, 0);
+		if (retval < 0) {
+			return -EIO;
+		}
+		break;
+	case PM_DEVICE_ACTION_TURN_ON:
+		if (!gpio_is_ready_dt(&drv_cfg->supply_gpio)) {
+			return -ENOTSUP;
+		}
+
+		retval = tmag5273_init(dev);
+		if (retval < 0) {
+			return retval;
+		}
+		break;
+	default:
+		LOG_ERR("unsupported action %d", action);
+		return -ENOTSUP;
+	}
+
+	return 0;
+}
+#endif
 
 /**
  * @brief update the measurement range of the X/Y/Z-axis
@@ -477,13 +609,20 @@ static int tmag5273_attr_set(const struct device *dev, enum sensor_channel chan,
 		return -EINVAL;
 	}
 
+	int retval;
+
+#ifdef CONFIG_PM_DEVICE
+	retval = tmag5273_pm_is_modifiable(dev);
+	if (retval < 0) {
+		return retval;
+	}
+#endif
+
 	if (chan != SENSOR_CHAN_MAGN_XYZ) {
 		return -ENOTSUP;
 	}
 
 	const struct tmag5273_config *drv_cfg = dev->config;
-
-	int retval;
 
 	switch ((uint16_t)attr) {
 	case SENSOR_ATTR_FULL_SCALE:
@@ -527,13 +666,20 @@ static int tmag5273_attr_get(const struct device *dev, enum sensor_channel chan,
 		return -EINVAL;
 	}
 
+	int retval;
+
+#ifdef CONFIG_PM_DEVICE
+	retval = tmag5273_pm_is_modifiable(dev);
+	if (retval != 0) {
+		return retval;
+	}
+#endif
+
 	if (chan != SENSOR_CHAN_MAGN_XYZ) {
 		return -ENOTSUP;
 	}
 
 	const struct tmag5273_config *drv_cfg = dev->config;
-
-	int retval;
 
 	switch ((uint16_t)attr) {
 	case SENSOR_ATTR_FULL_SCALE:
@@ -570,6 +716,13 @@ static int tmag5273_sample_fetch(const struct device *dev, enum sensor_channel c
 	struct tmag5273_data *drv_data = dev->data;
 
 	int retval;
+
+#ifdef CONFIG_PM_DEVICE
+	retval = tmag5273_pm_is_modifiable(dev);
+	if (retval < 0) {
+		return retval;
+	}
+#endif
 
 	uint8_t i2c_buffer[TMAG5273_I2C_BUFFER_SIZE] = {0};
 
@@ -1190,7 +1343,7 @@ static inline int tmag5273_update_i2c_address(const struct tmag5273_config *drv_
  * @retval -EINVAL if bus label is invalid
  * @retval -EIO on communication errors
  */
-static int tmag5273_init(const struct device *dev)
+int tmag5273_init(const struct device *dev)
 {
 	const struct tmag5273_config *drv_cfg = dev->config;
 	struct tmag5273_data *drv_data = dev->data;
@@ -1213,6 +1366,11 @@ static int tmag5273_init(const struct device *dev)
 		LOG_ERR("could not get pointer to TMAG5273 I2C device");
 		return -ENODEV;
 	}
+
+#if CONFIG_PM_DEVICE
+	/* perform an unchecked wakeup in case the sensor didn't had a power cycle */
+	(void)tmag5273_pm_wakeup(dev);
+#endif
 
 	/* if a device needs a new i2c address assign it, else we need to check if it can be reached
 	 * if it is powered via a supply gpio */
@@ -1265,6 +1423,24 @@ static int tmag5273_init(const struct device *dev)
 			return -EINVAL;
 		}
 	}
+
+#ifdef CONFIG_PM_DEVICE
+	if (drv_cfg->pm_i2c_workaround) {
+		/* see datasheet footnote (1) in section 6.3 */
+		retval = i2c_reg_update_byte_dt(&drv_cfg->i2c, TMAG5273_REG_DEVICE_CONFIG_2,
+						TMAG5273_OPERATING_MODE_MSK,
+						TMAG5273_OPERATING_MODE_SLEEP);
+		if (retval < 0) {
+			return retval;
+		}
+
+		k_usleep(TMAG5273_T_TO_SLEEP_US);
+
+		if (!tmag5273_pm_wakeup(dev)) {
+			return -EIO;
+		}
+	}
+#endif
 
 	retval = i2c_reg_read_byte_dt(&drv_cfg->i2c, TMAG5273_REG_DEVICE_CONFIG_2, &regdata);
 	if (retval < 0) {
@@ -1388,10 +1564,16 @@ static const struct sensor_driver_api tmag5273_driver_api = {
 		.startup_delay_us = DT_INST_PROP(inst, startup_delay_us),                          \
 		.i2c_update = DT_INST_NODE_HAS_PROP(inst, i2c_startup_address),                    \
 		.i2c_startup_address = DT_INST_PROP_OR(inst, i2c_startup_address, 0),              \
-		IF_ENABLED(CONFIG_CRC, (.crc_enabled = DT_INST_PROP(inst, crc_enabled),))};        \
+		IF_ENABLED(CONFIG_CRC, (.crc_enabled = DT_INST_PROP(inst, crc_enabled),))          \
+			IF_ENABLED(CONFIG_PM_DEVICE,                                               \
+				   (.pm_i2c_workaround = DT_INST_PROP(                             \
+					    inst, pm_i2c_vcc_slew_rate_sequence),))};              \
 	static struct tmag5273_data tmag5273_driver_data##inst;                                    \
-	SENSOR_DEVICE_DT_INST_DEFINE(inst, tmag5273_init, NULL, &tmag5273_driver_data##inst,       \
-				     &tmag5273_driver_cfg##inst, POST_KERNEL,                      \
-				     CONFIG_SENSOR_INIT_PRIORITY, &tmag5273_driver_api);
+	IF_ENABLED(CONFIG_PM_DEVICE, (PM_DEVICE_DT_INST_DEFINE(inst, tmag5273_pm_ctrl)));          \
+	SENSOR_DEVICE_DT_INST_DEFINE(                                                              \
+		inst, tmag5273_init,                                                               \
+		COND_CODE_1(CONFIG_PM_DEVICE, (PM_DEVICE_DT_INST_GET(inst)), (NULL)),              \
+		&tmag5273_driver_data##inst, &tmag5273_driver_cfg##inst, POST_KERNEL,              \
+		CONFIG_SENSOR_INIT_PRIORITY, &tmag5273_driver_api);
 
 DT_INST_FOREACH_STATUS_OKAY(TMAG5273_DEFINE)
