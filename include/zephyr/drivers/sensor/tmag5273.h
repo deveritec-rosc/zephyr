@@ -66,6 +66,14 @@ enum tmag5273_attribute {
 	 * See datasheet section 8.1.4 Magnetic Limit Check.
 	 */
 	TMAG5273_ATTR_THRESHOLD_LIMIT,
+
+	/**
+	 * Sleep time used for the wakeup-and-sleep mode.
+	 * If the value does not match any of the supported values, the next lower value is used.
+	 *
+	 * For a list of supported values, please see the datasheet.
+	 */
+	TMAG5273_ATTR_SLEEPTIME,
 };
 
 /**

@@ -276,6 +276,30 @@ static bool tmag5273_pm_wakeup(const struct device *dev)
 	return true;
 }
 
+static int tmag5273_pm_ctrl(const struct device *dev, enum pm_device_action action)
+{
+	int retval;
+
+#if CONFIG_TMAG5273_TRIGGER
+	const struct tmag5273_config *drv_cfg = dev->config;
+
+	if (action == PM_DEVICE_ACTION_RESUME) {
+		if (drv_cfg->pm_int_suspend_to_wakeup_sleep &&
+		    tmag5273_on_interrupt_handling(dev)) {
+			/* on wakeup-&-sleep interrupt, device is already in an active state */
+			return 0;
+		}
+	}
+#endif
+
+	retval = tmag5273_pm_set_operation_mode(dev, action);
+	if (retval < 0) {
+		return retval;
+	}
+
+	return 0;
+}
+
 static int tmag5273_pm_write_target_mode(const struct device *dev, const uint8_t target_mode)
 {
 	const struct tmag5273_config *drv_cfg = dev->config;
@@ -294,7 +318,7 @@ static int tmag5273_pm_write_target_mode(const struct device *dev, const uint8_t
 	return 0;
 }
 
-static int tmag5273_pm_ctrl(const struct device *dev, enum pm_device_action action)
+int tmag5273_pm_set_operation_mode(const struct device *dev, enum pm_device_action action)
 {
 	const struct tmag5273_config *drv_cfg = dev->config;
 	uint8_t target_mode;
@@ -314,7 +338,7 @@ static int tmag5273_pm_ctrl(const struct device *dev, enum pm_device_action acti
 		k_usleep(TMAG5273_T_WAKEUP_US);
 		break;
 	case PM_DEVICE_ACTION_SUSPEND:
-		target_mode = (drv_cfg->pm_suspend_to_wakeup_sleep)
+		target_mode = (drv_cfg->pm_int_suspend_to_wakeup_sleep)
 				      ? TMAG5273_OPERATING_MODE_WAKEUP_SLEEP
 				      : TMAG5273_OPERATING_MODE_SLEEP;
 
@@ -575,10 +599,6 @@ static int tmag5273_attr_set(const struct device *dev, enum sensor_channel chan,
 	}
 #endif
 
-	if (chan != SENSOR_CHAN_MAGN_XYZ) {
-		return -ENOTSUP;
-	}
-
 	const struct tmag5273_config *drv_cfg = dev->config;
 
 	switch ((int)attr) {
@@ -613,6 +633,10 @@ static int tmag5273_attr_set(const struct device *dev, enum sensor_channel chan,
 	default:
 #ifdef CONFIG_TMAG5273_TRIGGER
 		retval = tmag5273_trigger_attr_set(dev, chan, attr, val);
+		if (retval < 0) {
+			return retval;
+		}
+
 #else
 		LOG_ERR("unknown attribute %d", (int)attr);
 		return -ENOTSUP;
@@ -644,14 +668,14 @@ static int tmag5273_attr_get(const struct device *dev, enum sensor_channel chan,
 	}
 #endif
 
-	if (chan != SENSOR_CHAN_MAGN_XYZ) {
-		return -ENOTSUP;
-	}
-
 	const struct tmag5273_config *drv_cfg = dev->config;
 
 	switch ((int)attr) {
 	case SENSOR_ATTR_FULL_SCALE:
+		if (chan != SENSOR_CHAN_MAGN_XYZ) {
+			return -ENOTSUP;
+		}
+
 		if (drv_cfg->meas_range != TMAG5273_DT_AXIS_RANGE_RUNTIME) {
 			return -ENOTSUP;
 		}
@@ -662,6 +686,10 @@ static int tmag5273_attr_get(const struct device *dev, enum sensor_channel chan,
 		}
 		break;
 	case TMAG5273_ATTR_ANGLE_MAG_AXIS:
+		if (chan != SENSOR_CHAN_MAGN_XYZ) {
+			return -ENOTSUP;
+		}
+
 		if (drv_cfg->angle_magnitude_axis != TMAG5273_DT_ANGLE_MAG_RUNTIME) {
 			return -ENOTSUP;
 		}
@@ -672,8 +700,16 @@ static int tmag5273_attr_get(const struct device *dev, enum sensor_channel chan,
 		}
 		break;
 	default:
-		LOG_ERR("unknown attribute %d", attr);
+#if CONFIG_TMAG5273_TRIGGER
+		retval = tmag5273_trigger_attr_get(dev, chan, attr, val);
+		if (retval < 0) {
+			return retval;
+		}
+
+#else
+		LOG_ERR("unknown attribute %d", (int)attr);
 		return -ENOTSUP;
+#endif
 	}
 
 	return 0;
@@ -1282,8 +1318,10 @@ static int tmag5273_control_power_supply(const struct tmag5273_config *drv_cfg,
 		}
 	}
 
-	return 0;
-}
+	if (!i2c_is_ready_dt(&drv_cfg->i2c)) {
+		LOG_ERR("could not get pointer to TMAG5273 I2C device");
+		return -ENODEV;
+	}
 
 /**
  * @brief update the i2c address of the TMAG5273
@@ -1543,6 +1581,7 @@ static const struct sensor_driver_api tmag5273_driver_api = {
 
 #ifdef CONFIG_PM_DEVICE
 #define TMAG5273_PM_CONFIG(inst)                                                                   \
+	.pm_int_suspend_to_wakeup_sleep = DT_INST_PROP(inst, int_suspend_to_wakeup_and_sleep),     \
 	.pm_i2c_workaround = DT_INST_PROP(inst, pm_i2c_vcc_slew_rate_sequence),
 #else
 #define TMAG5273_PM_CONFIG(inst)

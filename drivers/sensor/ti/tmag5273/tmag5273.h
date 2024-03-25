@@ -105,6 +105,7 @@
 #define TMAG5273_MAG_CH_EN_POS	4
 #define TMAG5273_SLEEPTIME_POS	0
 
+#define TMAG5273_SLEEPTIME_MSK	GENMASK(3, 0)
 #define TMAG5273_MAG_CH_EN_NONE	(0x0 << TMAG5273_MAG_CH_EN_POS)
 #define TMAG5273_MAG_CH_EN_X	(0x1 << TMAG5273_MAG_CH_EN_POS)
 #define TMAG5273_MAG_CH_EN_Y	(0x2 << TMAG5273_MAG_CH_EN_POS)
@@ -316,6 +317,7 @@ struct tmag5273_config {
 #endif
 
 #ifdef CONFIG_PM_DEVICE
+	bool pm_int_suspend_to_wakeup_sleep;
 	bool pm_i2c_workaround;
 #endif
 
@@ -365,6 +367,7 @@ int tmag5273_clear_latching_interrupt(const struct device *dev);
 
 #ifdef CONFIG_PM_DEVICE
 int tmag5273_pm_is_modifiable(const struct device *dev);
+int tmag5273_pm_set_operation_mode(const struct device *dev, enum pm_device_action action);
 #endif
 
 #ifdef CONFIG_TMAG5273_TRIGGER

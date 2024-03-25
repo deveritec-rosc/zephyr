@@ -102,6 +102,12 @@ properties:
       Selects the latched-mode for the interrupt when enabled,
       and the pulsed-mode when disabled.
 
+  int-suspend-to-wakeup-and-sleep:
+    type: boolean
+    description: |
+      Suspend device to "wakeup-and-sleep"-mode instead of "sleep"-mode if trigger is active.
+      Ignored if triggers are not activated via Kconfig.
+
   temperature-coefficient:
     type: int
     default: 0

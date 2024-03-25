@@ -9,8 +9,8 @@
 #include <zephyr/device.h>
 #include <zephyr/kernel.h>
 
-#include <zephyr/dt-bindings/sensor/tmag5273.h>
 #include <zephyr/drivers/sensor/tmag5273.h>
+#include <zephyr/dt-bindings/sensor/tmag5273.h>
 
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/drivers/i2c.h>
@@ -221,6 +221,131 @@ static inline int tmag5273_trigger_attr_get_threshold(const struct device *dev,
 	return 0;
 }
 
+static inline int tmag5273_trigger_attr_set_sleeptime(const struct device *dev,
+						      enum sensor_channel chan,
+						      const struct sensor_value *val)
+{
+	const struct tmag5273_config *drv_cfg = dev->config;
+
+	int retval;
+	uint8_t regdata;
+
+	if (chan != SENSOR_CHAN_MAGN_XYZ) {
+		LOG_ERR("unsupported channel %d", (int)chan);
+		return -ENOTSUP;
+	}
+
+	if (val->val1 == 1) {
+		regdata = TMAG5273_WS_SLEEPTIME_1MS;
+	} else if (val->val1 <= 5) {
+		regdata = TMAG5273_WS_SLEEPTIME_5MS;
+	} else if (val->val1 <= 10) {
+		regdata = TMAG5273_WS_SLEEPTIME_10MS;
+	} else if (val->val1 <= 15) {
+		regdata = TMAG5273_WS_SLEEPTIME_15MS;
+	} else if (val->val1 <= 20) {
+		regdata = TMAG5273_WS_SLEEPTIME_20MS;
+	} else if (val->val1 <= 30) {
+		regdata = TMAG5273_WS_SLEEPTIME_30MS;
+	} else if (val->val1 <= 50) {
+		regdata = TMAG5273_WS_SLEEPTIME_50MS;
+	} else if (val->val1 <= 100) {
+		regdata = TMAG5273_WS_SLEEPTIME_100MS;
+	} else if (val->val1 <= 500) {
+		regdata = TMAG5273_WS_SLEEPTIME_500MS;
+	} else if (val->val1 <= 1000) {
+		regdata = TMAG5273_WS_SLEEPTIME_1000MS;
+	} else if (val->val1 <= 2000) {
+		regdata = TMAG5273_WS_SLEEPTIME_2000MS;
+	} else if (val->val1 <= 5000) {
+		regdata = TMAG5273_WS_SLEEPTIME_5000MS;
+	} else if (val->val1 <= 20000) {
+		regdata = TMAG5273_WS_SLEEPTIME_20000MS;
+	} else {
+		LOG_ERR("invalid sleeptime %d", val->val1);
+		return -ENOTSUP;
+	}
+
+	retval = i2c_reg_update_byte_dt(&drv_cfg->i2c, TMAG5273_REG_SENSOR_CONFIG_1,
+					TMAG5273_SLEEPTIME_MSK, regdata);
+	if (retval < 0) {
+		LOG_ERR("error updating sleeptime %d", retval);
+		return retval;
+	}
+
+	return 0;
+}
+
+static inline int tmag5273_trigger_attr_get_sleeptime(const struct device *dev,
+						      enum sensor_channel chan,
+						      struct sensor_value *val)
+{
+	const struct tmag5273_config *drv_cfg = dev->config;
+	int retval;
+	uint8_t regdata;
+
+	if (chan != SENSOR_CHAN_MAGN_XYZ) {
+		LOG_ERR("unsupported channel %d", (int)chan);
+		return -ENOTSUP;
+	}
+
+	retval = i2c_reg_read_byte_dt(&drv_cfg->i2c, TMAG5273_REG_SENSOR_CONFIG_1, &regdata);
+	if (retval < 0) {
+		LOG_ERR("error reading SENSOR_CONFIG1 %d", retval);
+		return retval;
+	}
+
+	switch (regdata & TMAG5273_SLEEPTIME_MSK) {
+	case TMAG5273_WS_SLEEPTIME_1MS:
+		val->val1 = 1;
+		break;
+	case TMAG5273_WS_SLEEPTIME_5MS:
+		val->val1 = 5;
+		break;
+	case TMAG5273_WS_SLEEPTIME_10MS:
+		val->val1 = 10;
+		break;
+	case TMAG5273_WS_SLEEPTIME_15MS:
+		val->val1 = 15;
+		break;
+	case TMAG5273_WS_SLEEPTIME_20MS:
+		val->val1 = 20;
+		break;
+	case TMAG5273_WS_SLEEPTIME_30MS:
+		val->val1 = 30;
+		break;
+	case TMAG5273_WS_SLEEPTIME_50MS:
+		val->val1 = 50;
+		break;
+	case TMAG5273_WS_SLEEPTIME_100MS:
+		val->val1 = 100;
+		break;
+	case TMAG5273_WS_SLEEPTIME_500MS:
+		val->val1 = 500;
+		break;
+	case TMAG5273_WS_SLEEPTIME_1000MS:
+		val->val1 = 1000;
+		break;
+	case TMAG5273_WS_SLEEPTIME_2000MS:
+		val->val1 = 2000;
+		break;
+	case TMAG5273_WS_SLEEPTIME_5000MS:
+		val->val1 = 5000;
+		break;
+	case TMAG5273_WS_SLEEPTIME_20000MS:
+		val->val1 = 20000;
+		break;
+	default:
+		LOG_ERR("invalid value read from sensor 0x%X",
+			(int)(regdata & TMAG5273_SLEEPTIME_MSK));
+		return -EINVAL;
+	}
+
+	val->val2 = 0;
+
+	return 0;
+}
+
 static inline int tmag5273_trigger_attr_set_threshold_limit(const struct device *dev,
 							    enum sensor_channel chan,
 							    const struct sensor_value *val)
@@ -408,6 +533,12 @@ int tmag5273_trigger_attr_set(const struct device *dev, enum sensor_channel chan
 			return retval;
 		}
 		break;
+	case TMAG5273_ATTR_SLEEPTIME:
+		retval = tmag5273_trigger_attr_set_sleeptime(dev, chan, val);
+		if (retval < 0) {
+			return retval;
+		}
+		break;
 	case TMAG5273_ATTR_THRESHOLD_COUNT:
 		retval = tmag5273_trigger_attr_set_threshold_count(dev, chan, val);
 		if (retval < 0) {
@@ -437,6 +568,12 @@ int tmag5273_trigger_attr_get(const struct device *dev, enum sensor_channel chan
 	case SENSOR_ATTR_UPPER_THRESH:
 	case SENSOR_ATTR_LOWER_THRESH:
 		retval = tmag5273_trigger_attr_get_threshold(dev, chan, val);
+		if (retval < 0) {
+			return retval;
+		}
+		break;
+	case TMAG5273_ATTR_SLEEPTIME:
+		retval = tmag5273_trigger_attr_get_sleeptime(dev, chan, val);
 		if (retval < 0) {
 			return retval;
 		}
@@ -507,9 +644,48 @@ static void tmag5273_thread_cb(const struct device *dev)
 
 	atomic_set_bit(&drv_data->on_interrupt, TMAG5273_ON_INTERRUPT_BIT);
 
+#if CONFIG_PM_DEVICE
+	if (drv_cfg->pm_int_suspend_to_wakeup_sleep) {
+		retval = pm_device_state_get(dev, &pm_state);
+		if (retval < 0) {
+			LOG_ERR("cannot read pm device state %d", retval);
+		}
+
+		if (pm_state == PM_DEVICE_STATE_SUSPENDED) {
+			/* wakeup & sleep interrupt: if the user sets the PM state to "suspend" in
+			 * the callback, another interrupt might be issued so the sensor is again
+			 * not sleeping */
+			pm_device_action_run(dev, PM_DEVICE_ACTION_RESUME);
+
+			retval = gpio_pin_interrupt_configure_dt(&drv_cfg->int_gpio,
+								 GPIO_INT_EDGE_FALLING);
+			if (retval < 0) {
+				LOG_ERR("error activating SoC interrupt %d", retval);
+			}
+		}
+	}
+#endif
+
 	if (drv_data->int_handler != NULL) {
 		drv_data->int_handler(dev, drv_data->int_trigger);
 	}
+
+#if CONFIG_PM_DEVICE
+	/* set correct mode if wakeup-&-sleep is active */
+	if (drv_cfg->pm_int_suspend_to_wakeup_sleep) {
+		enum pm_device_state pm_state;
+
+		retval = pm_device_state_get(dev, &pm_state);
+		if (retval < 0) {
+			LOG_ERR("cannot read pm device state %d", retval);
+		}
+
+		if (pm_state == PM_DEVICE_STATE_ACTIVE) {
+			/* force correct mode (e.g. continuous) after user callback */
+			tmag5273_pm_set_operation_mode(dev, PM_DEVICE_ACTION_RESUME);
+		}
+	}
+#endif
 
 	atomic_clear_bit(&drv_data->on_interrupt, TMAG5273_ON_INTERRUPT_BIT);
 
