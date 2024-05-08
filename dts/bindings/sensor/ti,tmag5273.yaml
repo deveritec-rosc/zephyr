@@ -181,3 +181,16 @@ properties:
       - 0x22 # TMAG5273_DT_I2C_STARTUP_ADDRESS_B1_B2 (TMAG5273B1/B2)
       - 0x78 # TMAG5273_DT_I2C_STARTUP_ADDRESS_C1_C2 (TMAG5273C1/C2)
       - 0x44 # TMAG5273_DT_I2C_STARTUP_ADDRESS_D1_D2 (TMAG5273D1/D2)
+
+   startup-delay-us:
+    type: int
+    default: 270
+    description: |
+      Duration required to power up the sensor
+
+      This provides the duration, in microseconds, before the first transaction
+      with the device is performed after setting the VCC pin to high.
+
+      Defaults to value provided by datasheet.
+
+      Ignored if supply-gpios not defined.

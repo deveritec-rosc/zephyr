@@ -66,6 +66,7 @@ struct tmag5273_config {
 	struct gpio_dt_spec int_gpio;
 
 	struct gpio_dt_spec supply_gpio; /** VCC for delayed startup */
+	size_t startup_delay_us;         /** power up time after the VCC pin is set to high */
 	bool i2c_update;             /** if true, i2c address needs to be updated after startup */
 	uint8_t i2c_startup_address; /** startup address of one device */
 
@@ -1132,7 +1133,7 @@ static int tmag5273_init(const struct device *dev)
 			return -EIO;
 		}
 
-		k_usleep(TMAG5273_T_STARTUP_US);
+		k_usleep(drv_cfg->startup_delay_us);
 	}
 
 	if (!i2c_is_ready_dt(&drv_cfg->i2c)) {
@@ -1287,6 +1288,7 @@ static const struct sensor_driver_api tmag5273_driver_api = {
 		.ignore_diag_fail = DT_INST_PROP(inst, ignore_diag_fail),                          \
 		.int_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, int_gpios, {0}),                        \
 		.supply_gpio = GPIO_DT_SPEC_INST_GET_OR(inst, supply_gpios, {0}),                  \
+		.startup_delay_us = DT_INST_PROP(inst, startup_delay_us),                          \
 		.i2c_update = DT_INST_NODE_HAS_PROP(inst, i2c_startup_address),                    \
 		.i2c_startup_address = DT_INST_PROP_OR(inst, i2c_startup_address, 0),              \
 		IF_ENABLED(CONFIG_CRC, (.crc_enabled = DT_INST_PROP(inst, crc_enabled),))};        \
