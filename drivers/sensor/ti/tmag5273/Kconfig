@@ -12,3 +12,49 @@ config TMAG5273
 	imply CRC
 	help
 	  Enable driver for TMAG5273 I2C-based 3d Hall-Effect sensor.
+
+if TMAG5273
+
+config TMAG5273_TRIGGER
+	bool
+
+choice TMAG5273_TRIGGER_CHOICE
+	prompt "trigger mode"
+	default TMAG5273_TRIGGER_NONE
+	help
+	  Specify the type of triggering to be used by the driver.
+	  Note: Since figuring out which interrupt was triggered, using the Zephyr
+	  standard types will deactivate the other interrupt.
+
+	config TMAG5273_TRIGGER_NONE
+		bool "no trigger"
+
+	config TMAG5273_TRIGGER_GLOBAL_THREAD
+		bool "use global thread"
+		select TMAG5273_TRIGGER
+
+	config TMAG5273_TRIGGER_OWN_THREAD
+		bool "use own thread"
+		select TMAG5273_TRIGGER
+
+endchoice
+
+if TMAG5273_TRIGGER
+
+config TMAG5273_THREAD_PRIORITY
+	int "thread priority"
+	depends on TMAG5273_TRIGGER_OWN_THREAD
+	default 10
+	help
+	  Priority of thread used by the driver to handle interrupts.
+
+config TMAG5273_THREAD_STACK_SIZE
+	int "thread stack size"
+	depends on TMAG5273_TRIGGER_OWN_THREAD
+	default 1024
+	help
+	  Stack size of thread used by the driver to handle interrupts.
+
+endif # TMAG5273_TRIGGER
+
+endif # TMAG5273

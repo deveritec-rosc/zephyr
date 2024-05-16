@@ -46,6 +46,26 @@ enum tmag5273_attribute {
 	 * Only available if calculation source can be changed during runtime.
 	 */
 	TMAG5273_ATTR_ANGLE_MAG_AXIS = SENSOR_ATTR_PRIV_START,
+
+	/**
+	 * Number of times a threshold must be crossed before an interrupt is triggered
+	 * Supported values are:
+	 *  - \c 1
+	 *  - \c 4
+	 */
+	TMAG5273_ATTR_THRESHOLD_COUNT,
+
+	/**
+	 * Threshold limit type.
+	 * Supported values are:
+	 *  - \c TMAG5273_THRESHOLD_LIMIT_ABOVE (Fig. 8-4)
+	 *  - \c TMAG5273_THRESHOLD_LIMIT_BELOW (Fig. 8-5)
+	 *  - \c TMAG5273_THRESHOLD_LIMIT_OUT_OF_BAND (Fig. 8-6)
+	 *  - \c TMAG5273_THRESHOLD_LIMIT_INSIDE_BAND (Fig. 8-7)
+	 *
+	 * See datasheet section 8.1.4 Magnetic Limit Check.
+	 */
+	TMAG5273_ATTR_THRESHOLD_LIMIT,
 };
 
 /**
@@ -56,6 +76,11 @@ enum tmag5273_attribute {
 #define TMAG5273_ANGLE_CALC_XY   1
 #define TMAG5273_ANGLE_CALC_YZ   2
 #define TMAG5273_ANGLE_CALC_XZ   3
+
+#define TMAG5273_THRESHOLD_LIMIT_ABOVE       0
+#define TMAG5273_THRESHOLD_LIMIT_BELOW       1
+#define TMAG5273_THRESHOLD_LIMIT_OUT_OF_BAND 2
+#define TMAG5273_THRESHOLD_LIMIT_INSIDE_BAND 3
 
 #ifdef __cplusplus
 }

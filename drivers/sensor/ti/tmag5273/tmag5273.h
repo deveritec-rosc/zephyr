@@ -7,6 +7,11 @@
 #ifndef ZEPHYR_DRIVERS_SENSOR_TMAG5273_H_
 #define ZEPHYR_DRIVERS_SENSOR_TMAG5273_H_
 
+#include <zephyr/drivers/gpio.h>
+#include <zephyr/drivers/i2c.h>
+#include <zephyr/drivers/sensor.h>
+#include <zephyr/pm/device.h>
+#include <zephyr/sys/atomic.h>
 #include <zephyr/sys/util.h>
 
 /* --- Register definitions --- */
@@ -76,10 +81,11 @@
 #define TMAG5273_TRIGGER_MODE_POS	2
 #define TMAG5273_OPERATING_MODE_POS	0
 
+#define TMAG5273_THR_HYST_MSK		GENMASK(7, 5)
 #define TMAG5273_OPERATING_MODE_MSK	GENMASK(1, 0)
 
 #define TMAG5273_THR_HYST_COMPLEMENT	(0 << TMAG5273_THR_HYST_POS)
-#define TMAG5273_THR_HYST_LSB		(1 << TMAG5273_THR_HYST_POS)
+#define TMAG5273_THR_HYST_LSB_ONLY	(1 << TMAG5273_THR_HYST_POS)
 
 #define TMAG5273_LP_LOWPOWER	(0 << TMAG5273_LP_LN_POS)
 #define TMAG5273_LP_LOWNOISE	(1 << TMAG5273_LP_LN_POS)
@@ -119,23 +125,25 @@
 #define TMAG5273_WS_SLEEPTIME_20000MS	(0xC << TMAG5273_SLEEPTIME_POS)
 
 /* Register SENSOR_CONFIG_2 */
-#define TMAG5273_INT_THRX_COUNT_POS	6
-#define TMAG5273_INT_MAG_THR_DIR_POS	5
+#define TMAG5273_THRX_COUNT_POS		6
+#define TMAG5273_MAG_THR_DIR_POS	5
 #define TMAG5273_GAIN_CORRECTION_CH_POS	4
 #define TMAG5273_ANGLE_EN_POS		2
 #define TMAG5273_X_Y_RANGE_POS		1
 #define TMAG5273_Z_RANGE_POS		0
 
+#define TMAG5273_THRX_COUNT_MSK		GENMASK(6, 6)
+#define TMAG5273_MAG_THR_DIRECTION_MSK	GENMASK(5, 5)
 #define TMAG5273_ANGLE_EN_MSK		GENMASK(3, 2)
 #define TMAG5273_MEAS_RANGE_X_Y_MSK	GENMASK(1, 1)
 #define TMAG5273_MEAS_RANGE_Z_MSK	GENMASK(0, 0)
 #define TMAG5273_MEAS_RANGE_XYZ_MSK	(TMAG5273_MEAS_RANGE_X_Y_MSK | TMAG5273_MEAS_RANGE_Z_MSK)
 
-#define TMAG5273_INT_THRX_COUNT_1	(0 << TMAG5273_INT_THRX_COUNT_POS)
-#define TMAG5273_INT_THRX_COUNT_4	(1 << TMAG5273_INT_THRX_COUNT_POS)
+#define TMAG5273_THRX_COUNT_1	(0 << TMAG5273_THRX_COUNT_POS)
+#define TMAG5273_THRX_COUNT_4	(1 << TMAG5273_THRX_COUNT_POS)
 
-#define TMAG5273_MAG_THR_DIRECTION_ABOVE	(0 << TMAG5273_INT_MAG_THR_DIR_POS)
-#define TMAG5273_MAG_THR_DIRECTION_BELOW	(1 << TMAG5273_INT_MAG_THR_DIR_POS)
+#define TMAG5273_MAG_THR_DIRECTION_ABOVE	(0 << TMAG5273_MAG_THR_DIR_POS)
+#define TMAG5273_MAG_THR_DIRECTION_BELOW	(1 << TMAG5273_MAG_THR_DIR_POS)
 
 #define TMAG5273_MAG_GAIN_CORRECTION_CH_1	(0 << TMAG5273_GAIN_CORRECTION_CH_POS)
 #define TMAG5273_MAG_GAIN_CORRECTION_CH_2	(1 << TMAG5273_GAIN_CORRECTION_CH_POS)
@@ -162,17 +170,21 @@
 #define TMAG5273_T_CH_EN_ENABLED	(1 << TMAG5273_T_CH_EN_POS)
 
 /* Register INT_CONFIG_1 */
-#define TMAG5273_INT_RSLT_INT_POS	7
-#define TMAG5273_INT_THRSLD_INT_POS	6
-#define TMAG5273_INT_STATE_POS		5
-#define TMAG5273_INT_MODE_POS		2
-#define TMAG5273_INT_MASK_INTB_POS	0
+#define TMAG5273_RSLT_INT_POS	7
+#define TMAG5273_THRSLD_INT_POS	6
+#define TMAG5273_INT_STATE_POS	5
+#define TMAG5273_INT_MODE_POS	2
+#define TMAG5273_MASK_INTB_POS	0
 
-#define TMAG5273_INT_RSLT_INT_DISABLED	(0 << TMAG5273_INT_RSLT_INT_POS)
-#define TMAG5273_INT_RSLT_INT_ENABLED	(1 << TMAG5273_INT_RSLT_INT_POS)
+#define TMAG5273_RSLT_THRSLD_INT_MSK	GENMASK(7, 6)
+#define TMAG5273_INT_MODE_MSK		GENMASK(4, 2)
+#define TMAG5273_MASK_INTB_MSK		GENMASK(0, 0)
 
-#define TMAG5273_INT_THRSLD_INT_DISABLED	(0 << TMAG5273_INT_THRSLD_INT_POS)
-#define TMAG5273_INT_THRSLD_INT_ENABLED		(1 << TMAG5273_INT_THRSLD_INT_POS)
+#define TMAG5273_RSLT_INT_DISABLED	(0 << TMAG5273_RSLT_INT_POS)
+#define TMAG5273_RSLT_INT_ENABLED	(1 << TMAG5273_RSLT_INT_POS)
+
+#define TMAG5273_THRSLD_INT_DISABLED	(0 << TMAG5273_THRSLD_INT_POS)
+#define TMAG5273_THRSLD_INT_ENABLED	(1 << TMAG5273_THRSLD_INT_POS)
 
 #define TMAG5273_INT_STATE_LATCHED	(0 << TMAG5273_INT_STATE_POS)
 #define TMAG5273_INT_STATE_PULSE	(1 << TMAG5273_INT_STATE_POS)
@@ -183,8 +195,8 @@
 #define TMAG5273_INT_MODE_SCL		(3 << TMAG5273_INT_MODE_POS)
 #define TMAG5273_INT_MODE_SCL_EXC_I2C	(4 << TMAG5273_INT_MODE_POS)
 
-#define TMAG5273_INT_MASK_INTB_PIN_ENABLED	(0 << TMAG5273_INT_MASK_INTB_POS)
-#define TMAG5273_INT_MASK_INTB_PIN_MASKED	(1 << TMAG5273_INT_MASK_INTB_POS)
+#define TMAG5273_MASK_INTB_PIN_ENABLED	(0 << TMAG5273_MASK_INTB_POS)
+#define TMAG5273_MASK_INTB_PIN_MASKED	(1 << TMAG5273_MASK_INTB_POS)
 
 /* Register I2C_ADDRESS */
 #define TMAG5273_I2C_ADDRESS_POS		1
@@ -260,9 +272,113 @@
  * @param avg set averaging value
  * @param nb_channels number of captured channels
  */
-#define TMAG5273_T_CONVERSION_US(avg, nb_channels) (((1 << avg) * 25) * nb_channels + 25)
+#define TMAG5273_T_CONVERSION_US(avg, nb_channels)	(((1 << avg) * 25) * nb_channels + 25)
 
 /** OR this bit to any register address to trigger a conversion in standby mode */
-#define TMAG5273_CONVERSION_START_BIT 0x80
+#define TMAG5273_CONVERSION_START_BIT	0x80
+
+enum tmag5273_drv_data_threshold_axis {
+	TMAG5273_DRV_DATA_THRESHOLD_AXIS_X = 0,
+	TMAG5273_DRV_DATA_THRESHOLD_AXIS_Y = 1,
+	TMAG5273_DRV_DATA_THRESHOLD_AXIS_Z = 2,
+
+	TMAG5273_DRV_DATA_THRESHOLD_AXIS_SIZE,
+};
+
+struct tmag5273_config {
+	struct i2c_dt_spec i2c;
+
+	uint8_t mag_channel;
+	uint8_t axis;
+	bool temperature;
+
+	uint8_t meas_range;
+	uint8_t temperature_coefficient;
+	uint8_t angle_magnitude_axis;
+	uint8_t ch_mag_gain_correction;
+
+	uint8_t operation_mode;
+	uint8_t averaging;
+
+	bool trigger_conv_via_int;
+	bool low_noise_mode;
+	bool ignore_diag_fail;
+
+	struct gpio_dt_spec int_gpio;
+
+	struct gpio_dt_spec supply_gpio; /** VCC for delayed startup */
+	size_t startup_delay_us;         /** power up time after the VCC pin is set to high */
+	bool i2c_update;             	 /** if true, i2c address needs to be updated after startup */
+	uint8_t i2c_startup_address; 	 /** startup address of one device */
+
+#ifdef CONFIG_CRC
+	bool crc_enabled;
+#endif
+
+#ifdef CONFIG_PM_DEVICE
+	bool pm_i2c_workaround;
+#endif
+
+#ifdef CONFIG_TMAG5273_TRIGGER
+	uint8_t int_mode;
+	bool int_latched;
+#endif
+};
+
+struct tmag5273_data {
+	uint8_t version;             /** version as given by the sensor */
+	uint16_t conversion_time_us; /** time for one conversion */
+
+	int16_t x_sample;           /** measured B-field @x-axis */
+	int16_t y_sample;           /** measured B-field @y-axis */
+	int16_t z_sample;           /** measured B-field @z-axis */
+	int16_t temperature_sample; /** measured temperature data */
+
+	uint16_t xyz_range; /** magnetic range for x/y/z-axis in mT */
+
+	int16_t angle_sample;     /** measured angle in degree, if activated */
+	uint8_t magnitude_sample; /** Positive vector magnitude (can be >7 bit). */
+
+#ifdef CONFIG_TMAG5273_TRIGGER
+	const struct device *dev;          /** points to own handle */
+	struct gpio_callback int_callback; /** generic driver callback, forwards to user handle */
+
+	int32_t int_threshold[TMAG5273_DRV_DATA_THRESHOLD_AXIS_SIZE];
+
+	const struct sensor_trigger *int_trigger;
+	sensor_trigger_handler_t int_handler;
+
+	atomic_t on_interrupt;
+
+#ifdef CONFIG_TMAG5273_TRIGGER_OWN_THREAD
+	K_KERNEL_STACK_MEMBER(thread_stack, CONFIG_TMAG5273_THREAD_STACK_SIZE);
+	struct k_thread thread;
+	struct k_sem gpio_sem;
+#elif CONFIG_TMAG5273_TRIGGER_GLOBAL_THREAD
+	struct k_work work;
+#endif
+
+#endif
+};
+
+int tmag5273_clear_latching_interrupt(const struct device *dev);
+
+#ifdef CONFIG_PM_DEVICE
+int tmag5273_pm_is_modifiable(const struct device *dev);
+#endif
+
+#ifdef CONFIG_TMAG5273_TRIGGER
+int tmag5273_trigger_init(const struct device *dev);
+
+int tmag5273_trigger_attr_set(const struct device *dev, enum sensor_channel chan,
+			      enum sensor_attribute attr, const struct sensor_value *val);
+int tmag5273_trigger_attr_get(const struct device *dev, enum sensor_channel chan,
+			      enum sensor_attribute attr, struct sensor_value *val);
+
+int tmag5273_trigger_set(const struct device *dev, const struct sensor_trigger *trig,
+			 sensor_trigger_handler_t handler);
+
+bool tmag5273_on_interrupt_handling(const struct device *dev);
+#endif
 
 #endif /* ZEPHYR_DRIVERS_SENSOR_TMAG5273_H_ */

@@ -83,6 +83,25 @@ properties:
       The signal is active-low as produced by the sensor.
       Either used for interrupt signaling, or triggering a conversion.
 
+  int-mode:
+    type: int
+    default: 0
+    enum:
+      - 0
+      - 1
+    description: |
+      Selects how an interrupt is triggered.
+      Defaults to triggering through INT.
+
+        - 0 # TMAG5273_DT_INT_THROUGH_INT (through INT)
+        - 1 # TMAG5273_DT_INT_THROUGH_INT_EXC_I2C (through INT except when I2C bus busy)
+
+  int-latched:
+    type: boolean
+    description: |
+      Selects the latched-mode for the interrupt when enabled,
+      and the pulsed-mode when disabled.
+
   temperature-coefficient:
     type: int
     default: 0
@@ -107,6 +126,8 @@ properties:
       "wakeup-and-sleep"- or "sleep"-mode.
 
       Using I2C-conversion trigger may result in (handled) I2C-errors.
+
+      Cannot be used if interrupts are active.
 
   angle-magnitude-axis:
     type: int
