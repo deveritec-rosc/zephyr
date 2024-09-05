@@ -43,6 +43,11 @@ LOG_MODULE_REGISTER(TMAG5273, CONFIG_SENSOR_LOG_LEVEL);
 #define TMAG5273_I2C_BUFFER_SIZE                                                                   \
 	(TMAG5273_REG_RESULT_END - TMAG5273_REG_RESULT_BEGIN + 1 + TMAG5273_CRC_I2C_SIZE)
 
+enum tmag5273_supply_gpio_mode {
+	TMAG5273_SUPPLY_OFF = 0,
+	TMAG5273_SUPPLY_ON,
+};
+
 /** static configuration data */
 struct tmag5273_config {
 	struct i2c_dt_spec i2c;
@@ -1103,6 +1108,81 @@ static inline int tmag5273_init_sensor_settings(const struct tmag5273_config *dr
 }
 
 /**
+ * @brief controls the power supply pin of the TMAG5273, if available
+ *
+ * @param drv_cfg driver instance configuration
+ * @param mode power supply mode, can be either \c TMAG5273_SUPPLY_ON or \c TMAG5273_SUPPLY_OFF
+ *
+ * @retval 0 on success
+ * @retval -EIO on error
+ */
+static int tmag5273_control_power_supply(const struct tmag5273_config *drv_cfg,
+					 const enum tmag5273_supply_gpio_mode mode)
+{
+	/* device needs to be powered on */
+	if (gpio_is_ready_dt(&drv_cfg->supply_gpio)) {
+		int retval;
+
+		retval = gpio_pin_configure_dt(&drv_cfg->supply_gpio, GPIO_OUTPUT);
+		if (retval < 0) {
+			LOG_ERR("could not activate sensor %d", retval);
+			return -EIO;
+		}
+
+		retval = gpio_pin_set_dt(&drv_cfg->supply_gpio, (int)mode);
+		if (retval < 0) {
+			LOG_ERR("could not activate sensor %d", retval);
+			return -EIO;
+		}
+
+		if (TMAG5273_SUPPLY_ON) {
+			k_usleep(drv_cfg->startup_delay_us);
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * @brief update the i2c address of the TMAG5273
+ *
+ * @param drv_cfg driver instance configuration, holds start address
+ *
+ * @retval 0 on success
+ * @retval -EIO on error
+ */
+static inline int tmag5273_update_i2c_address(const struct tmag5273_config *drv_cfg)
+{
+	struct i2c_dt_spec i2c_start = drv_cfg->i2c;
+
+	int retval;
+	uint8_t regdata;
+
+	i2c_start.addr = drv_cfg->i2c_startup_address;
+
+	regdata = TMAG5273_I2C_ADDRESS_UPDATE_ENABLE |
+		  FIELD_PREP(TMAG5273_I2C_ADDRESS_MSK, drv_cfg->i2c.addr);
+
+	retval = i2c_reg_write_byte_dt(&i2c_start, TMAG5273_REG_I2C_ADDRESS, regdata);
+
+	if (retval < 0) {
+		LOG_ERR("error setting I2C_ADDRESS (0x%x -> 0x%x) %d", drv_cfg->i2c_startup_address,
+			drv_cfg->i2c.addr, retval);
+		return -EIO;
+	}
+
+	/* perform a readout to see if the device is also responding to read requests */
+	retval = i2c_reg_read_byte_dt(&drv_cfg->i2c, TMAG5273_REG_I2C_ADDRESS, &regdata);
+
+	if (retval < 0) {
+		LOG_ERR("error reading from new i2c address 0x%x %d", drv_cfg->i2c.addr, retval);
+		return -EIO;
+	}
+
+	return 0;
+}
+
+/**
  * @brief initialize a TMAG5273 sensor
  *
  * @param dev handle to the device
@@ -1120,20 +1200,14 @@ static int tmag5273_init(const struct device *dev)
 	uint8_t regdata;
 
 	/* device needs to be powered on */
-	if (gpio_is_ready_dt(&drv_cfg->supply_gpio)) {
-		retval = gpio_pin_configure_dt(&drv_cfg->supply_gpio, GPIO_OUTPUT);
-		if (retval < 0) {
-			LOG_ERR("could not activate sensor %d", retval);
-			return -EIO;
-		}
+	const bool has_supply_gpio = gpio_is_ready_dt(&drv_cfg->supply_gpio);
 
-		retval = gpio_pin_set_dt(&drv_cfg->supply_gpio, 1);
-		if (retval < 0) {
-			LOG_ERR("could not activate sensor %d", retval);
-			return -EIO;
-		}
+	if (has_supply_gpio) {
+		retval = tmag5273_control_power_supply(drv_cfg, TMAG5273_SUPPLY_ON);
 
-		k_usleep(drv_cfg->startup_delay_us);
+		if (retval != 0) {
+			return retval;
+		}
 	}
 
 	if (!i2c_is_ready_dt(&drv_cfg->i2c)) {
@@ -1141,17 +1215,41 @@ static int tmag5273_init(const struct device *dev)
 		return -ENODEV;
 	}
 
-	if (drv_cfg->i2c_update && (tmag5273_check_manufacturer_id(&drv_cfg->i2c, false) < 0)) {
-		struct i2c_dt_spec i2c_start = drv_cfg->i2c;
+	/* if a device needs a new i2c address assign it, else we need to check if it can be reached
+	 * if it is powered via a supply gpio */
+	if (drv_cfg->i2c_update) {
+		if (tmag5273_check_manufacturer_id(&drv_cfg->i2c, false) < 0) {
+			retval = tmag5273_update_i2c_address(drv_cfg);
+			if (retval < 0) {
+				/* if there are supply pins, try to toggle the power source in case
+				 * there are problems with registers */
+				if (has_supply_gpio) {
+					tmag5273_control_power_supply(drv_cfg, TMAG5273_SUPPLY_OFF);
+					tmag5273_control_power_supply(drv_cfg, TMAG5273_SUPPLY_ON);
 
-		i2c_start.addr = drv_cfg->i2c_startup_address;
+					retval = tmag5273_update_i2c_address(drv_cfg);
+				}
 
-		regdata = TMAG5273_I2C_ADDRESS_UPDATE_ENABLE |
-			  FIELD_PREP(TMAG5273_I2C_ADDRESS_MSK, drv_cfg->i2c.addr);
-
-		retval = i2c_reg_write_byte_dt(&i2c_start, TMAG5273_REG_I2C_ADDRESS, regdata);
+				if (retval < 0) {
+					return retval;
+				}
+			}
+		}
+	} else if (has_supply_gpio) {
+		/* perform read to figure out if the chip can be reached */
+		retval =
+			i2c_reg_read_byte_dt(&drv_cfg->i2c, TMAG5273_REG_DEVICE_CONFIG_2, &regdata);
 		if (retval < 0) {
-			LOG_ERR("error setting I2C_ADDRESS ");
+			/* toggle the power source in case there are problems with registers */
+			tmag5273_control_power_supply(drv_cfg, TMAG5273_SUPPLY_OFF);
+			tmag5273_control_power_supply(drv_cfg, TMAG5273_SUPPLY_ON);
+
+			retval = i2c_reg_read_byte_dt(&drv_cfg->i2c, TMAG5273_REG_DEVICE_CONFIG_2,
+						      &regdata);
+		}
+
+		if (retval < 0) {
+			LOG_ERR("could not read from device %d", retval);
 			return -EIO;
 		}
 	}
